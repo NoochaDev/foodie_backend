@@ -56,157 +56,78 @@ class RecipesSelectionController extends Controller
     }
 
     public function selectRecipes(Request $request) {
-        $user = User::findOrFail(1); // amount_per_day, protein_amount, fat_amount, carbihydrates_amount 
-        $userId = User::findOrFail(1)->id;
+        $user = User::findOrFail(1);
+        $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
         $recipes = Recipe::with('ingredients')->get();
 
-        // 1. Берем те рецепты, у которых отсутствует МАКСИМУМ 2 ингредиента 
         $filteredRecipes = $recipes->filter(function($recipe) use ($selectedIngredientsIds) {
             $recipeIngredientIds = $recipe->ingredients->pluck('id')->toArray();
             $missingCount = count(array_diff($recipeIngredientIds, $selectedIngredientsIds));
-
             return $missingCount <= 2;
         });
 
-        // 2. Формирование меню в виде списка для инсерта в БД (цикл по дням недели + завтрак, обед, ужин)
         $times = MealType::pluck('id')->toArray();
         $days = range(1, 7);
-        
+
+        $mealPercents = [
+            1 => 0.3, // завтрак
+            2 => 0.4, // обед
+            3 => 0.3, // ужин
+        ];
+
         $weeklyMenu = [];
 
         foreach ($days as $day) {
-            $bestDayMenu = null;
-            $bestScore = PHP_INT_MAX; // минимизируем отклонение от целей
-            $attempts = 10; // число попыток подбора меню на день
+            foreach ($times as $time) {
+                $targetCalories = $user->amount_per_day * $mealPercents[$time];
+                $targetProtein = $user->protein_amount * $mealPercents[$time];
+                $targetFat = $user->fat_amount * $mealPercents[$time];
+                $targetCarbs = $user->carbohydrates_amount * $mealPercents[$time];
 
-            for ($i = 0; $i < $attempts; $i++) {
-                $count_calories = 0;
-                $count_protein = 0;
-                $count_fat = 0;
-                $count_carbohydrates = 0;
-                $dayMenu = [];
+                $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
 
-                foreach ($times as $time) {
-                    $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
+                if ($recipesByTime->isEmpty()) {
+                    continue;
+                }
 
-                    if ($recipesByTime->isEmpty()) {
-                        continue;
+                $bestRecipe = null;
+                $bestScore = PHP_INT_MAX;
+
+                foreach ($recipesByTime as $recipe) {
+                    $nutrients = $recipe->nutrients;
+                    $score = abs(($nutrients['calories'] - $targetCalories) / $targetCalories)
+                        + abs(($nutrients['protein'] - $targetProtein) / $targetProtein)
+                        + abs(($nutrients['fat'] - $targetFat) / $targetFat)
+                        + abs(($nutrients['carbohydrates'] - $targetCarbs) / $targetCarbs);
+
+                    if ($score < $bestScore) {
+                        $bestScore = $score;
+                        $bestRecipe = $recipe;
                     }
+                }
 
-                    $randomRecipe = $recipesByTime->random();
-
-                    $nutrients = $randomRecipe->nutrients;
-
-                    $count_calories += $nutrients['calories'];
-                    $count_protein += $nutrients['protein'];
-                    $count_fat += $nutrients['fat'];
-                    $count_carbohydrates += $nutrients['carbohydrates'];
-
-                    $dayMenu[] = [
+                if ($bestRecipe) {
+                    $weeklyMenu[] = [
                         'user_id' => $userId,
-                        'recipe_id' => $randomRecipe->id,
+                        'recipe_id' => $bestRecipe->id,
                         'day' => $day,
                         'time' => $time,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
                 }
-
-                // Считаем, насколько меню близко к целям пользователя
-                $score = abs($count_calories - $user->amount_per_day)
-                    + abs($count_protein - $user->protein_amount)
-                    + abs($count_fat - $user->fat_amount)
-                    + abs($count_carbohydrates - $user->carbohydrates_amount);
-
-                if ($score < $bestScore) {
-                    $bestScore = $score;
-                    $bestDayMenu = $dayMenu;
-                }
-            }
-
-            // Проверка дневных значений нутриентов с допуском ±10%
-            $withinRange = function ($value, $target) {
-                return $value >= $target * 0.9 && $value <= $target * 1.1;
-            };
-
-            // Если лучший найденный вариант входит в допуск ±10%
-            if ($bestDayMenu !== null && 
-                $withinRange($count_calories, $user->amount_per_day) &&
-                $withinRange($count_protein, $user->protein_amount) &&
-                $withinRange($count_fat, $user->fat_amount) &&
-                $withinRange($count_carbohydrates, $user->carbohydrates_amount)
-            ) {
-                $weeklyMenu = array_merge($weeklyMenu, $bestDayMenu);
             }
         }
 
-        // 3. Сохраняем в meal_plan
+        // Очистка и запись в БД
         DB::table('meal_plan')->where('user_id', $userId)->delete();
         DB::table('meal_plan')->insert($weeklyMenu);
 
-        // 4. Возвращаем респонс
         return response()->json([
             'message' => 'Меню на неделю успешно сгенерировано',
             'data' => $weeklyMenu,
         ]);
     }
-
-    // public function selectRecipes(Request $request) {
-    //     $data = $request->validate([
-    //         'ingredients_ids' => 'required|array',
-    //         'ingredients_ids.*' => 'integer|exists:ingredients,id'
-    //     ]);
-// 
-    //     // Для примера — жестко заданные цели по БЖУ и калориям (нужно заменить на данные текущего пользователя)
-    //     $kcalTarget = 2039 / 3;
-    //     $proteinTarget = 204 / 3;
-    //     $fatTarget = 68 / 3;
-    //     $carbsTarget = 153 / 3;
-// 
-    //     // Погрешности (в процентах, например 0.1 = 10%)
-    //     $kcalTolerance = 0.05;    // ±5%
-    //     $proteinTolerance = 0.1;  // ±10%
-    //     $fatTolerance = 0.1;      // ±10%
-    //     $carbsTolerance = 0.1;    // ±10%
-// 
-    //     $ingredientsIds = $data['ingredients_ids'];
-// 
-    //     // Достаём рецепты, которые содержат все указанные ингредиенты
-    //     $recipes = Recipe::whereHas('ingredients', function ($query) use ($ingredientsIds) {
-    //         $query->whereIn('ingredients.id', $ingredientsIds);
-    //     }, '=', count($ingredientsIds))->with('ingredients')->get();
-// 
-    //     // Фильтруем рецепты по калориям и БЖУ с учетом количества ингредиентов
-    //     $filtered = $recipes->filter(function ($recipe) use (
-    //         $kcalTarget, $proteinTarget, $fatTarget, $carbsTarget,
-    //         $kcalTolerance, $proteinTolerance, $fatTolerance, $carbsTolerance
-    //     ) {
-    //         $totals = [
-    //             'kcal' => 0,
-    //             'protein' => 0,
-    //             'fat' => 0,
-    //             'carbs' => 0,
-    //         ];
-// 
-    //         foreach ($recipe->ingredients as $ingredient) {
-    //             $amountFactor = $ingredient->pivot->amount / 100; // граммы / 100г для расчёта нутриентов
-// 
-    //             $totals['kcal'] += $amountFactor;
-    //             $totals['protein'] += $ingredient->protein;
-    //             $totals['fat'] += $ingredient->fat;
-    //             $totals['carbs'] += $ingredient->carbohydrates;
-    //         }
-// 
-    //         // Проверяем, что итоговые значения в пределах допустимой погрешности
-    //         return
-    //             ($totals['kcal'] >= $kcalTarget * (1 - $kcalTolerance) && $totals['kcal'] <= $kcalTarget * (1 + $kcalTolerance)) &&
-    //             ($totals['protein'] >= $proteinTarget * (1 - $proteinTolerance) && $totals['protein'] <= $proteinTarget * (1 + $proteinTolerance)) &&
-    //             ($totals['fat'] >= $fatTarget * (1 - $fatTolerance) && $totals['fat'] <= $fatTarget * (1 + $fatTolerance)) &&
-    //             ($totals['carbs'] >= $carbsTarget * (1 - $carbsTolerance) && $totals['carbs'] <= $carbsTarget * (1 + $carbsTolerance));
-    //     });
-// 
-    //     return response()->json($filtered->values());
-    // } 
 }
