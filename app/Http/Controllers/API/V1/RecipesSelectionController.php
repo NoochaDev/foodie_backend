@@ -56,6 +56,7 @@ class RecipesSelectionController extends Controller
     }
 
     public function selectRecipes(Request $request) {
+        $user = User::findOrFail(1); // amount_per_day, protein_amount, fat_amount, carbihydrates_amount 
         $userId = User::findOrFail(1)->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
@@ -69,30 +70,75 @@ class RecipesSelectionController extends Controller
             return $missingCount <= 2;
         });
 
-        // 2. Формирование меню, цикл по дням недели + завтрак, обед, ужин
+        // 2. Формирование меню в виде списка для инсерта в БД (цикл по дням недели + завтрак, обед, ужин)
         $times = MealType::pluck('id')->toArray();
         $days = range(1, 7);
         
         $weeklyMenu = [];
 
         foreach ($days as $day) {
-            foreach ($times as $time) {
-                $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
-                
-                if ($recipesByTime->isEmpty()) {
-                    continue;
+            $bestDayMenu = null;
+            $bestScore = PHP_INT_MAX; // минимизируем отклонение от целей
+            $attempts = 10; // число попыток подбора меню на день
+
+            for ($i = 0; $i < $attempts; $i++) {
+                $count_calories = 0;
+                $count_protein = 0;
+                $count_fat = 0;
+                $count_carbohydrates = 0;
+                $dayMenu = [];
+
+                foreach ($times as $time) {
+                    $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
+
+                    if ($recipesByTime->isEmpty()) {
+                        continue;
+                    }
+
+                    $randomRecipe = $recipesByTime->random();
+
+                    $nutrients = $randomRecipe->nutrients;
+
+                    $count_calories += $nutrients['calories'];
+                    $count_protein += $nutrients['protein'];
+                    $count_fat += $nutrients['fat'];
+                    $count_carbohydrates += $nutrients['carbohydrates'];
+
+                    $dayMenu[] = [
+                        'user_id' => $userId,
+                        'recipe_id' => $randomRecipe->id,
+                        'day' => $day,
+                        'time' => $time,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
                 }
 
-                $randomRecipe = $recipesByTime->random();
+                // Считаем, насколько меню близко к целям пользователя
+                $score = abs($count_calories - $user->amount_per_day)
+                    + abs($count_protein - $user->protein_amount)
+                    + abs($count_fat - $user->fat_amount)
+                    + abs($count_carbohydrates - $user->carbohydrates_amount);
 
-                $weeklyMenu[] = [
-                    'user_id' => $userId,
-                    'recipe_id' => $randomRecipe->id,
-                    'day' => $day,
-                    'time' => $time, // сохраняем id типа
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
+                if ($score < $bestScore) {
+                    $bestScore = $score;
+                    $bestDayMenu = $dayMenu;
+                }
+            }
+
+            // Проверка дневных значений нутриентов с допуском ±10%
+            $withinRange = function ($value, $target) {
+                return $value >= $target * 0.9 && $value <= $target * 1.1;
+            };
+
+            // Если лучший найденный вариант входит в допуск ±10%
+            if ($bestDayMenu !== null && 
+                $withinRange($count_calories, $user->amount_per_day) &&
+                $withinRange($count_protein, $user->protein_amount) &&
+                $withinRange($count_fat, $user->fat_amount) &&
+                $withinRange($count_carbohydrates, $user->carbohydrates_amount)
+            ) {
+                $weeklyMenu = array_merge($weeklyMenu, $bestDayMenu);
             }
         }
 

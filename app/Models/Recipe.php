@@ -34,17 +34,17 @@ class Recipe extends Model
 
     public function getNutrientsAttribute()
     {
-        $protein = $fat = $carbs = 0;
+        $protein = $fat = $carbohydrates = 0;
 
         foreach ($this->ingredients as $ingredient) {
             $amount = $ingredient->pivot->amount;
 
             $protein += $ingredient->protein * $amount / 100;
             $fat     += $ingredient->fat * $amount / 100;
-            $carbs   += $ingredient->carbohydrates * $amount / 100;
+            $carbohydrates   += $ingredient->carbohydrates * $amount / 100;
         }
 
-        $calories = 4 * $protein + 9 * $fat + 4 * $carbs;
+        $calories = 4 * $protein + 9 * $fat + 4 * $carbohydrates;
 
         return compact('protein', 'fat', 'carbohydrates', 'calories');
     }
