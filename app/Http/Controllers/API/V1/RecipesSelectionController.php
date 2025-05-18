@@ -60,13 +60,21 @@ class RecipesSelectionController extends Controller
         $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
-        $recipes = Recipe::with('ingredients')->get();
+        // $recipes = Recipe::with('ingredients')->get();
+// 
+        // $filteredRecipes = $recipes->filter(function($recipe) use ($selectedIngredientsIds) {
+        //     $recipeIngredientIds = $recipe->ingredients->pluck('id')->toArray();
+        //     $missingCount = count(array_diff($recipeIngredientIds, $selectedIngredientsIds));
+        //     return $missingCount <= 2;
+        // });
 
-        $filteredRecipes = $recipes->filter(function($recipe) use ($selectedIngredientsIds) {
-            $recipeIngredientIds = $recipe->ingredients->pluck('id')->toArray();
-            $missingCount = count(array_diff($recipeIngredientIds, $selectedIngredientsIds));
-            return $missingCount <= 2;
-        });
+        $filteredRecipes = Recipe::select('recipes.*')
+            ->join('ingredient_recipe', 'recipes.id', '=', 'ingredient_recipe.recipe_id')
+            ->leftJoin('ingredients', 'ingredients.id', '=', 'ingredient_recipe.ingredient_id')
+            ->groupBy('recipes.id')
+            ->havingRaw('SUM(CASE WHEN ingredients.id NOT IN (' . implode(',', $selectedIngredientsIds ?: [0]) . ') THEN 1 ELSE 0 END) <= 2')
+            ->with('ingredients')
+            ->get();
 
         $times = MealType::pluck('id')->toArray();
         $days = range(1, 7);
@@ -94,30 +102,36 @@ class RecipesSelectionController extends Controller
 
                 $bestRecipe = null;
                 $bestScore = PHP_INT_MAX;
-
-                foreach ($recipesByTime as $recipe) {
+                
+                // Вычисляем score для каждого рецепта
+                $recipesWithScores = $recipesByTime->map(function($recipe) use ($targetCalories, $targetProtein, $targetFat, $targetCarbs) {
                     $nutrients = $recipe->nutrients;
                     $score = abs(($nutrients['calories'] - $targetCalories) / $targetCalories)
                         + abs(($nutrients['protein'] - $targetProtein) / $targetProtein)
                         + abs(($nutrients['fat'] - $targetFat) / $targetFat)
                         + abs(($nutrients['carbohydrates'] - $targetCarbs) / $targetCarbs);
+                    return ['recipe' => $recipe, 'score' => $score];
+                });
 
-                    if ($score < $bestScore) {
-                        $bestScore = $score;
-                        $bestRecipe = $recipe;
-                    }
-                }
+                // Сортируем по score (возрастание)
+                $sorted = $recipesWithScores->sortBy('score')->values();
 
-                if ($bestRecipe) {
-                    $weeklyMenu[] = [
-                        'user_id' => $userId,
-                        'recipe_id' => $bestRecipe->id,
-                        'day' => $day,
-                        'time' => $time,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                }
+                // Берем топ-3 (или меньше, если их меньше)
+                $topN = $sorted->take(3);
+
+                // Случайно выбираем один из топ-3
+                $chosen = $topN->random();
+
+                $bestRecipe = $chosen['recipe'];
+
+                $weeklyMenu[] = [
+                    'user_id' => $userId,
+                    'recipe_id' => $bestRecipe->id,
+                    'day' => $day,
+                    'time' => $time,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
             }
         }
 
