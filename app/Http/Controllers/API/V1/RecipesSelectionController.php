@@ -60,14 +60,6 @@ class RecipesSelectionController extends Controller
         $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
-        // $recipes = Recipe::with('ingredients')->get();
-// 
-        // $filteredRecipes = $recipes->filter(function($recipe) use ($selectedIngredientsIds) {
-        //     $recipeIngredientIds = $recipe->ingredients->pluck('id')->toArray();
-        //     $missingCount = count(array_diff($recipeIngredientIds, $selectedIngredientsIds));
-        //     return $missingCount <= 2;
-        // });
-
         $filteredRecipes = Recipe::select('recipes.*')
             ->join('ingredient_recipe', 'recipes.id', '=', 'ingredient_recipe.recipe_id')
             ->leftJoin('ingredients', 'ingredients.id', '=', 'ingredient_recipe.ingredient_id')
@@ -100,10 +92,6 @@ class RecipesSelectionController extends Controller
                     continue;
                 }
 
-                $bestRecipe = null;
-                $bestScore = PHP_INT_MAX;
-                
-                // Вычисляем score для каждого рецепта
                 $recipesWithScores = $recipesByTime->map(function($recipe) use ($targetCalories, $targetProtein, $targetFat, $targetCarbs) {
                     $nutrients = $recipe->nutrients;
                     $score = abs(($nutrients['calories'] - $targetCalories) / $targetCalories)
@@ -113,35 +101,112 @@ class RecipesSelectionController extends Controller
                     return ['recipe' => $recipe, 'score' => $score];
                 });
 
-                // Сортируем по score (возрастание)
                 $sorted = $recipesWithScores->sortBy('score')->values();
-
-                // Берем топ-3 (или меньше, если их меньше)
                 $topN = $sorted->take(3);
-
-                // Случайно выбираем один из топ-3
                 $chosen = $topN->random();
+                $primary = $chosen['recipe'];
+                $primaryNutrients = $primary->nutrients;
 
-                $bestRecipe = $chosen['recipe'];
+                // Проверка покрытия нутриентов
+                $coverage = (
+                    ($primaryNutrients['calories'] / $targetCalories) +
+                    ($primaryNutrients['protein'] / $targetProtein) +
+                    ($primaryNutrients['fat'] / $targetFat) +
+                    ($primaryNutrients['carbohydrates'] / $targetCarbs)
+                ) / 4;
 
-                $weeklyMenu[] = [
-                    'user_id' => $userId,
-                    'recipe_id' => $bestRecipe->id,
-                    'day' => $day,
-                    'time' => $time,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
+                $recipeIds = [$primary->id];
+
+                // Если покрытие меньше 85%, подбираем второе блюдо
+                if ($coverage < 0.85) {
+                    $additional = $recipesByTime->filter(fn($r) => $r->id !== $primary->id)
+                        ->map(function ($r) use ($primaryNutrients, $targetCalories, $targetProtein, $targetFat, $targetCarbs) {
+                            $nutrients = $r->nutrients;
+                            $combined = [
+                                'calories' => $nutrients['calories'] + $primaryNutrients['calories'],
+                                'protein' => $nutrients['protein'] + $primaryNutrients['protein'],
+                                'fat' => $nutrients['fat'] + $primaryNutrients['fat'],
+                                'carbohydrates' => $nutrients['carbohydrates'] + $primaryNutrients['carbohydrates'],
+                            ];
+                            $score = abs(($combined['calories'] - $targetCalories) / $targetCalories)
+                                + abs(($combined['protein'] - $targetProtein) / $targetProtein)
+                                + abs(($combined['fat'] - $targetFat) / $targetFat)
+                                + abs(($combined['carbohydrates'] - $targetCarbs) / $targetCarbs);
+                            return ['recipe' => $r, 'score' => $score];
+                        })
+                        ->sortBy('score')
+                        ->first();
+
+                    if ($additional) {
+                        $recipeIds[] = $additional['recipe']->id;
+                    }
+                }
+
+                foreach ($recipeIds as $recipeId) {
+                    $weeklyMenu[] = [
+                        'user_id' => $userId,
+                        'recipe_id' => $recipeId,
+                        'day' => $day,
+                        'time' => $time,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                }
             }
         }
 
-        // Очистка и запись в БД
+        // Сохраняем в БД
         DB::table('meal_plan')->where('user_id', $userId)->delete();
         DB::table('meal_plan')->insert($weeklyMenu);
 
+        $usedRecipeIds = collect($weeklyMenu)->pluck('recipe_id')->unique();
+        $recipes = Recipe::whereIn('id', $usedRecipeIds)->get()->keyBy('id');
+
+        $groupedByDay = collect($weeklyMenu)->groupBy('day')->map(function($dayEntries) use ($recipes) {
+            $meals = [
+                1 => 'breakfast',
+                2 => 'lunch',
+                3 => 'dinner',
+            ];
+
+            $dayResult = [
+                'breakfast' => [],
+                'lunch' => [],
+                'dinner' => [],
+                'totals' => [
+                    'calories' => 0,
+                    'protein' => 0,
+                    'fat' => 0,
+                    'carbohydrates' => 0,
+                ],
+            ];
+
+            foreach ($dayEntries as $entry) {
+                $mealKey = $meals[$entry['time']] ?? null;
+                if (!$mealKey) continue;
+
+                $recipe = $recipes[$entry['recipe_id']];
+                $nutrients = $recipe->nutrients;
+
+                $dayResult[$mealKey][] = [
+                    'id' => $recipe->id,
+                    'title' => $recipe->title,
+                    'meal_type_id' => $recipe->meal_type_id,
+                    'nutrients' => $nutrients,
+                ];
+
+                $dayResult['totals']['calories'] += $nutrients['calories'] ?? 0;
+                $dayResult['totals']['protein'] += $nutrients['protein'] ?? 0;
+                $dayResult['totals']['fat'] += $nutrients['fat'] ?? 0;
+                $dayResult['totals']['carbohydrates'] += $nutrients['carbohydrates'] ?? 0;
+            }
+
+            return $dayResult;
+        });
+
         return response()->json([
             'message' => 'Меню на неделю успешно сгенерировано',
-            'data' => $weeklyMenu,
+            'week' => $groupedByDay,
         ]);
     }
 }
