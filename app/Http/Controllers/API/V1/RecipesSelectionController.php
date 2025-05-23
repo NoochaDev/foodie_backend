@@ -12,7 +12,9 @@ use App\Models\Recipe;
 use App\Models\Ingredient;
 use App\Models\MealType;
 
-use App\Services\MenuPlanner;
+use App\Services\MenuPlanning\MenuPlanner;
+use App\Services\MenuPlanning\MenuFormatterService;
+
 
 class RecipesSelectionController extends Controller
 {
@@ -62,17 +64,16 @@ class RecipesSelectionController extends Controller
         $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
-        $planner = new MenuPlanner();
+        // Инициализация сервиса планирования меню для пользователя
+        $planner = app(MenuPlanner::class);
         $weeklyMenu = $planner->generateWeeklyMenu($user, $selectedIngredientsIds);
 
         // Сохраняем в БД
         DB::table('meal_plan')->where('user_id', $userId)->delete();
         DB::table('meal_plan')->insert($weeklyMenu);
 
-        $usedRecipeIds = collect($weeklyMenu)->pluck('recipe_id')->unique();
-        $recipes = Recipe::whereIn('id', $usedRecipeIds)->get()->keyBy('id');
-
-        $groupedByDay = $planner->getPlan($weeklyMenu);
+        // Получаем план
+        $groupedByDay = app(MenuFormatterService::class)->getJsonPlan($weeklyMenu);
 
         return response()->json([
             'message' => 'Меню на неделю успешно сгенерировано',
