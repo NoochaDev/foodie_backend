@@ -31,6 +31,7 @@ class MenuFormatterService {
                                    'fat' => 0,
                                    'carbohydrates' => 0,
                             ],
+                            'additional_grams' => 0
                      ];
 
                      foreach ($dayEntries as $entry) {
@@ -47,10 +48,14 @@ class MenuFormatterService {
                                    'nutrients' => $nutrients,
                             ];
 
-                            $dayResult['totals']['calories'] += $nutrients['calories'] ?? 0;
-                            $dayResult['totals']['protein'] += $nutrients['protein'] ?? 0;
-                            $dayResult['totals']['fat'] += $nutrients['fat'] ?? 0;
-                            $dayResult['totals']['carbohydrates'] += $nutrients['carbohydrates'] ?? 0;
+                            $scale = $entry['additional_grams'] / 100;
+
+                            $dayResult['totals']['calories'] += ($nutrients['calories'] ?? 0) * $scale;
+                            $dayResult['totals']['protein'] += ($nutrients['protein'] ?? 0) * $scale;
+                            $dayResult['totals']['fat'] += ($nutrients['fat'] ?? 0) * $scale;
+                            $dayResult['totals']['carbohydrates'] += ($nutrients['carbohydrates'] ?? 0) * $scale;
+
+                            $dayResult['additional_grams'] += $entry['additional_grams'];
                      }
 
                      return $dayResult;

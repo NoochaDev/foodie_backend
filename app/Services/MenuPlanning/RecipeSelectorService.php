@@ -41,79 +41,56 @@ class RecipeSelectorService
               // }
               // return $this->buildMenuEntries($menuRecipes, $userId, $day, $time);
 
-              // Допустимый разброс
-              $tol = 0.1;
-
               // Выбираем первый рецепт случайно
-              $recipe1 = $recipesByTime->random();
-              $n1 = $recipe1;
+              $randomRecipe = $recipesByTime->random();
 
-              // Вычисляем диапазоны коэффициента для каждого нутриента
-              $ranges = [
-                     'cal' => [ ($targetCalories*(1-$tol)) / $recipe1->nutrients['calories'], ($targetCalories*(1+$tol)) / $recipe1->nutrients['calories'] ],
-                     'prot'=> [ ($targetProtein*(1-$tol))  / $recipe1->nutrients['protein'],  ($targetProtein*(1+$tol))  / $recipe1->nutrients['protein'] ],
-                     'fat' => [ ($targetFat*(1-$tol))      / $recipe1->nutrients['fat'],      ($targetFat*(1+$tol))      / $recipe1->nutrients['fat'] ],
-                     'carb'=> [ ($targetCarbs*(1-$tol))    / $recipe1->nutrients['carbohydrates'],    ($targetCarbs*(1+$tol))    / $recipe1->nutrients['carbohydrates'] ],
-              ];
+              $recipes = [];
 
-              // Пересечение диапазонов
-              $minX = max($ranges['cal'][0], $ranges['prot'][0], $ranges['fat'][0], $ranges['carb'][0], 0.5);
-              $maxX = min($ranges['cal'][1], $ranges['prot'][1], $ranges['fat'][1], $ranges['carb'][1], 2.0);
-              $results = [];
-              if ($minX <= $maxX) {
-                     // Один рецепт покрывает цели
-                     $factor = ($minX + $maxX) / 2;
-                     $results[] = [
+              $diff_target = $targetCalories / $randomRecipe->nutrients['calories'];
+              $additional_grams = $diff_target * 100;
+
+              if ($additional_grams > 300) {
+                     $additional_grams = 300;
+              }
+
+              $recipes[] = [
                      'user_id' => $userId,
-                     'recipe_id' => $recipe1->id,
+                     'recipe_id' => $randomRecipe->id,
+                     'additional_grams' => $additional_grams,
                      'day' => $day,
                      'time' => $time,
-                     'portion_factor' => $factor
-                     ];
-                     return $results;
-              }
-              // Если одного рецепта недостаточно, подбираем второй
-              $recipe2 = $recipesByTime->where('id', '!=', $recipe1->id)->random();
-              $n2 = $recipe2;
+                     'created_at' => now(),
+                     'updated_at' => now(),
+              ];
 
-              // Решаем систему для двух рецептов. Пример: решение по калориям и белкам.
-              // a1*X + b1*Y = targetCalories, a2*X + b2*Y = targetProtein
-              $a1 = $n1->nutrients['calories']; $b1 = $n2->nutrients['calories'];
-              $a2 = $n1->nutrients['protein'];  $b2 = $n2->nutrients['protein'];
-              $det = $a1 * $b2 - $a2 * $b1;
-              if (abs($det) > 1e-6) {
-                     // Решение линейной системы
-                     $X = ($targetCalories * $b2 - $targetProtein * $b1) / $det;
-                     $Y = ($a1 * $targetProtein - $a2 * $targetCalories) / $det;
-                     // Проверяем допустимость коэффициентов
-                     if ($X >= 0.5 && $X <= 2.0 && $Y >= 0.5 && $Y <= 2.0) {
-                     // Проверяем остальные нутриенты с учетом погрешности
-                     $totalFat = $n1->nutrients['fat'] * $X + $n2->nutrients['fat'] * $Y;
-                     $totalCarb= $n1->nutrients['carbohydrates']* $X + $n2->nutrients['carbohydrates']* $Y;
-                     if ($totalFat >= $targetFat*(1-$tol) && $totalFat <= $targetFat*(1+$tol)
-                     && $totalCarb >= $targetCarbs*(1-$tol) && $totalCarb <= $targetCarbs*(1+$tol)) {
-                            // Добавляем оба рецепта в результат
-                            $results[] = [
+              // Если первого рецепта не хватает даже в 300 граммах
+              $caloriesFromFirst = $randomRecipe->nutrients['calories'] * ($additional_grams / 100);
+
+              if ($caloriesFromFirst < $targetCalories * 0.9) {
+                     // Ищем второй рецепт, исключая первый
+                     $remainingRecipes = $recipesByTime->reject(fn($r) => $r->id === $randomRecipe->id);
+
+                     if ($remainingRecipes->isNotEmpty()) {
+                            $randomRecipe2 = $remainingRecipes->random();
+
+                            $remainingCalories = $targetCalories - $caloriesFromFirst;
+                            $diff_target2 = $remainingCalories / $randomRecipe2->nutrients['calories'];
+                            $additional_grams2 = min($diff_target2 * 100, 300); // но не больше 300 грамм
+
+                            $recipes[] = [
                                    'user_id' => $userId,
-                                   'recipe_id' => $recipe1->id,
+                                   'recipe_id' => $randomRecipe2->id,
+                                   'additional_grams' => $additional_grams2,
                                    'day' => $day,
                                    'time' => $time,
-                                   'portion_factor' => $X
+                                   'created_at' => now(),
+                                   'updated_at' => now(),
                             ];
-                            $results[] = [
-                                   'user_id' => $userId,
-                                   'recipe_id' => $recipe2->id,
-                                   'day' => $day,
-                                   'time' => $time,
-                                   'portion_factor' => $Y
-                            ];
-
-                            return $results;
-                     }
                      }
               }
-              // При неудаче можно повторить попытку с другими рецептами или обработать ошибку
-              return [];
+
+              return $recipes;
+
        }
 
        protected function scoreRecipes(Collection $recipes, float $targetCalories, float $targetProtein, float $targetFat, float $targetCarbs): Collection
