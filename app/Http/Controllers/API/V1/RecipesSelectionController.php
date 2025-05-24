@@ -12,7 +12,10 @@ use App\Models\Recipe;
 use App\Models\Ingredient;
 use App\Models\MealType;
 
+use App\Enums\MealType as MealTypeEnum;
+
 use App\Services\MenuPlanning\MenuPlanner;
+use App\Services\MenuPlanning\RecipeFilterService;
 use App\Services\MenuPlanning\MenuFormatterService;
 
 
@@ -64,20 +67,56 @@ class RecipesSelectionController extends Controller
         $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
 
-        // Инициализация сервиса планирования меню для пользователя
+        // Берем из Enum значения типов приема пищи на день
+        $mealTimes = [
+            MealTypeEnum::BREAKFAST->value,
+            MealTypeEnum::LUNCH->value,
+            MealTypeEnum::DINNER->value,
+        ];
+
+        // Формируем дефолтные проценты завтрака обеда и ужина
+        $mealPercents = [
+            MealTypeEnum::BREAKFAST->value => 0.3,
+            MealTypeEnum::LUNCH->value => 0.4,
+            MealTypeEnum::DINNER->value => 0.3,
+        ];
+
+        // Фильтруем рецепты по поступившим из запроса ингредиентам
+        $filteredRecipes = app(RecipeFilterService::class)->getFilteredRecipes($selectedIngredientsIds);
+
+        // $recipe_test = $filteredRecipes->first();
+        // dd($recipe_test->nutrients);
+
+        // Инициализация планировщика меню на неделю
         $planner = app(MenuPlanner::class);
-        $weeklyMenu = $planner->generateWeeklyMenu($user, $selectedIngredientsIds);
+
+        $amount_per_day = $user->amount_per_day;
+        $protein_amount = $user->protein_amount;
+        $fat_amount = $user->fat_amount;
+        $carbohydrates_amount = $user->carbohydrates_amount;
+
+        $weeklyMenu = $planner->generateWeeklyMenu(
+            $userId,
+            $amount_per_day,
+            $protein_amount,
+            $fat_amount,
+            $carbohydrates_amount,
+            $filteredRecipes,
+            $mealPercents,
+            $mealTimes
+        );
 
         // Сохраняем в БД
-        DB::table('meal_plan')->where('user_id', $userId)->delete();
-        DB::table('meal_plan')->insert($weeklyMenu);
+        // DB::table('meal_plan')->where('user_id', $userId)->delete();
+        // DB::table('meal_plan')->insert($weeklyMenu);
 
         // Получаем план
         $groupedByDay = app(MenuFormatterService::class)->getJsonPlan($weeklyMenu);
 
         return response()->json([
             'message' => 'Меню на неделю успешно сгенерировано',
-            'week' => $groupedByDay,
+            'weekWithAddPortion' => $weeklyMenu,
+            'simpleWeek' => $groupedByDay
         ]);
     }
 }

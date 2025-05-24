@@ -2,53 +2,44 @@
 
 namespace App\Services\MenuPlanning;
 
-use App\Services\MenuPlanning\MealScorerService;
-use App\Services\MenuPlanning\RecipeFilterService;
-use App\Services\MenuPlanning\MenuFormatterService;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 
-use App\Enums\MealType as MealTypeEnum;
+use App\Services\MenuPlanning\RecipeSelectorService;
 
-use App\Models\Recipe;
-use App\Models\User;
-use App\Models\MealType;
-
-use Illuminate\Support\Facades\DB;
 
 class MenuPlanner {
-       protected MenuScorerService $calculateService;
-       protected RecipeFilterService $filterService;
-       // protected MenuFormatterService $menuFormatterService;
+       protected RecipeSelectorService $recipeSelectorService;
 
        public function __construct(
-                     MenuScorerService $calculateService,
-                     RecipeFilterService $filterService,
-                     // MenuFormatterService $menuFormatterService
+                     RecipeSelectorService $recipeSelectorService,
               ) {
-              $this->calculateService = $calculateService;
-              $this->filterService = $filterService;
-              // $this->menuFormatterService = $menuFormatterService;
+              $this->recipeSelectorService = $recipeSelectorService;
        }
 
-       public function generateWeeklyMenu(User $user, array $selectedIngredientsIds) {
-              $filteredRecipes = $this->filterService->getFilteredRecipes($selectedIngredientsIds);
-
-              $times = MealType::pluck('id')->toArray();
+       /**
+        * @param int $userId
+        * @param Collection|array $filteredRecipes Коллекция рецептов (уже отфильтрованных)
+        * @param array $mealTimes Массив ID приемов пищи, например [1,2,3]
+        * @param array $mealPercents Проценты распределения по приемам пищи, например [1 => 0.3, 2 => 0.4, 3 => 0.3]
+        * @return array Массив с меню на неделю
+        */
+       public function generateWeeklyMenu(int $userId, float $amount_per_day, float $protein_amount, float $fat_amount, 
+       float $carbohydrates_amount, EloquentCollection|array $filteredRecipes, array $mealPercents, 
+       array $mealTimes) : array 
+       {
               $days = range(1, 7);
-
-              $mealPercents = [
-                     MealTypeEnum::BREAKFAST->value => 0.3, 
-                     MealTypeEnum::LUNCH->value => 0.4,
-                     MealTypeEnum::DINNER->value => 0.3,
-              ];
-
               $weeklyMenu = [];
 
               foreach ($days as $day) {
-                     foreach ($times as $time) {
-                            $targetCalories = $user->amount_per_day * $mealPercents[$time];
-                            $targetProtein = $user->protein_amount * $mealPercents[$time];
-                            $targetFat = $user->fat_amount * $mealPercents[$time];
-                            $targetCarbs = $user->carbohydrates_amount * $mealPercents[$time];
+                     foreach ($mealTimes as $time) {
+                            $targetCalories = $amount_per_day * $mealPercents[$time];
+                            $targetProtein = $protein_amount * $mealPercents[$time];
+                            $targetFat = $fat_amount * $mealPercents[$time];
+                            $targetCarbs = $carbohydrates_amount * $mealPercents[$time];
+
+                            if (is_array($filteredRecipes)) {
+                                   $filteredRecipes = collect($filteredRecipes);
+                            }
 
                             $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
 
@@ -56,12 +47,12 @@ class MenuPlanner {
                                    continue;
                             }
 
-                            $weeklyMenuPart = $this->calculateService->calculateScore(
+                            $weeklyMenuPart = $this->recipeSelectorService->selectMealForTimeSlot(
                                    $recipesByTime, 
                                    $targetCalories, 
                                    $targetProtein, 
-                                   $targetFat, $targetCalories, 
-                                   $user->id, $day, $time
+                                   $targetFat, $targetCarbs, 
+                                   $userId, $day, $time
                             );
 
                             $weeklyMenu = array_merge($weeklyMenu, $weeklyMenuPart);
