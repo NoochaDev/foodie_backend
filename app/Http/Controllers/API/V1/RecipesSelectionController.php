@@ -7,14 +7,12 @@ use Illuminate\Http\Request;
 
 use Illuminate\Support\Facades\DB;
 
+use App\Http\Resources\MenuRecipeResource;
+
 use App\Models\User;
 use App\Models\Recipe;
-use App\Models\Ingredient;
-use App\Models\MealType;
 
-use App\Enums\MealType as MealTypeEnum;
-
-use App\Services\MenuPlanning\MenuPlanner1;
+use App\Services\MenuPlanning\MenuPlanner;
 use App\Services\MenuPlanning\RecipeFilterService;
 use App\Services\MenuPlanning\MenuFormatterService;
 
@@ -71,13 +69,11 @@ class RecipesSelectionController extends Controller
         $filteredRecipes = app(RecipeFilterService::class)->getFilteredRecipes($selectedIngredientsIds);
 
         // Инициализация планировщика меню на неделю
-        $planner = app(MenuPlanner1::class);
+        $planner = app(MenuPlanner::class);
 
         $amount_per_day = $user->amount_per_day;
-        $protein_amount = $user->protein_amount;
-        $fat_amount = $user->fat_amount;
-        $carbohydrates_amount = $user->carbohydrates_amount;
 
+        // Генерируем меню на неделю
         $weeklyMenu = $planner->generateWeeklyMenu(
             $amount_per_day,
             $userId,
@@ -88,13 +84,6 @@ class RecipesSelectionController extends Controller
         // DB::table('meal_plan')->where('user_id', $userId)->delete();
         // DB::table('meal_plan')->insert($weeklyMenu);
 
-        // Получаем план
-        $groupedByDay = app(MenuFormatterService::class)->getJsonPlan($weeklyMenu);
-
-        return response()->json([
-            'message' => 'Меню на неделю успешно сгенерировано',
-            'weekWithAddPortion' => $weeklyMenu,
-            'simpleWeek' => $groupedByDay
-        ]);
+        return new MenuRecipeResource($weeklyMenu);
     }
 }

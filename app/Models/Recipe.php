@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+use App\Enums\MealType as MealTypeEnum;
+
 use App\Models\Ingredient;
 use App\Models\MealType;
 
@@ -15,6 +17,10 @@ class Recipe extends Model
         'meal_type_id',
         'name',
         'description',
+    ];
+
+    protected $casts = [
+        'meal_type_id' => MealTypeEnum::class,
     ];
 
     public function users() {

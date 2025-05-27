@@ -2,63 +2,103 @@
 
 namespace App\Services\MenuPlanning;
 
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
 
-use App\Services\MenuPlanning\RecipeSelectorService;
+use App\Enums\MealType as MealTypeEnum;
+use App\Models\Recipe;
 
 
 class MenuPlanner {
-       protected RecipeSelectorService $recipeSelectorService;
+       protected $mealTimes = [
+              MealTypeEnum::BREAKFAST->value,
+              MealTypeEnum::LUNCH->value,
+              MealTypeEnum::DINNER->value,
+       ];
 
-       public function __construct(
-                     RecipeSelectorService $recipeSelectorService,
-              ) {
-              $this->recipeSelectorService = $recipeSelectorService;
-       }
-
-       /**
-        * @param int $userId
-        * @param Collection|array $filteredRecipes Коллекция рецептов (уже отфильтрованных)
-        * @param array $mealTimes Массив ID приемов пищи, например [1,2,3]
-        * @param array $mealPercents Проценты распределения по приемам пищи, например [1 => 0.3, 2 => 0.4, 3 => 0.3]
-        * @return array Массив с меню на неделю
-        */
-       public function generateWeeklyMenu(int $userId, float $amount_per_day, float $protein_amount, float $fat_amount, 
-       float $carbohydrates_amount, EloquentCollection|array $filteredRecipes, array $mealPercents, 
-       array $mealTimes) : array 
-       {
-              $days = range(1, 7);
+       protected $mealPercents = [
+              MealTypeEnum::BREAKFAST->value => 0.3,
+              MealTypeEnum::LUNCH->value => 0.4,
+              MealTypeEnum::DINNER->value => 0.3,
+       ];
+       
+       /** 
+        * Генерирует меню на неделю с учетом целевой калорийности и рецептов которые подходят пользователю
+        * @param float $targetCalories Целевая калорийность на день
+        * @param int $userId ID пользователя
+        * @param \Illuminate\Support\Collection|array $recipes Коллекция или массив рецептов
+        * @return array Сформированное меню на неделю
+       */
+       public function generateWeeklyMenu(float $targetCalories, int $userId, $recipes) : array {
               $weeklyMenu = [];
 
-              foreach ($days as $day) {
-                     foreach ($mealTimes as $time) {
-                            $targetCalories = $amount_per_day * $mealPercents[$time];
-                            $targetProtein = $protein_amount * $mealPercents[$time];
-                            $targetFat = $fat_amount * $mealPercents[$time];
-                            $targetCarbs = $carbohydrates_amount * $mealPercents[$time];
-
-                            if (is_array($filteredRecipes)) {
-                                   $filteredRecipes = collect($filteredRecipes);
-                            }
-
-                            $recipesByTime = $filteredRecipes->where('meal_type_id', $time);
-
-                            if ($recipesByTime->isEmpty()) {
-                                   continue;
-                            }
-
-                            $weeklyMenuPart = $this->recipeSelectorService->selectMealForTimeSlot(
-                                   $recipesByTime, 
-                                   $targetCalories, 
-                                   $targetProtein, 
-                                   $targetFat, $targetCarbs, 
-                                   $userId, $day, $time
-                            );
-
-                            $weeklyMenu = array_merge($weeklyMenu, $weeklyMenuPart);
-                     }
+              for ($day = 1; $day < 8; $day++) {
+                     $dailyMenu = $this->generateDailyMenu($day, $targetCalories, $userId, $recipes);
+                     $weeklyMenu = array_merge($weeklyMenu, $dailyMenu->toArray());
               }
 
               return $weeklyMenu;
+       }
+
+
+       /**
+        * Генерирует меню на один день с учётом целевой калорийности.
+        *
+        * @param int $day День недели (0–6)
+        * @param float $targetCalories Целевая калорийность на день
+        * @param int $userId ID пользователя
+        * @param \Illuminate\Support\Collection|array $recipes Коллекция или массив рецептов
+        * @return \Illuminate\Support\Collection Сформированное меню за день
+       */
+       private function generateDailyMenu(int $day, float $targetCalories, int $userId, $recipes) : Collection
+       {
+              $dailyMenu = collect(); // сюда добавляем результат
+
+              foreach ($this->mealTimes as $time) {
+                     $timeCalories = $targetCalories * $this->mealPercents[$time];
+
+                     $recipe1 = $recipes->where('meal_type_id', $time)->shuffle()->first();
+
+                     $additionalGrams1 = $this->calculateAdditionalGrams($recipe1, $timeCalories);
+                     $recipe1Calories = $recipe1->nutrients['calories'] * ($additionalGrams1 / 100);
+
+                     $dailyMenu->push([
+                            'user_id' => $userId,
+                            'recipe_id' => $recipe1->id,
+                            'additional_grams' => $additionalGrams1,
+                            'time' => $time,
+                            'day' => $day,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                     ]);
+
+                     if ($recipe1Calories < $timeCalories * 0.9) {
+                            $snack = $recipes->where('meal_type_id', MealTypeEnum::SNACK->value)->shuffle()->first();
+
+                            $additionalGrams2 = $this->calculateAdditionalGrams($snack, $timeCalories - $recipe1Calories);
+
+                            $dailyMenu->push([
+                                   'user_id' => $userId,
+                                   'recipe_id' => $snack->id,
+                                   'additional_grams' => $additionalGrams2,
+                                   'time' => $time,
+                                   'day' => $day,
+                                   'created_at' => now(),
+                                   'updated_at' => now(),
+                            ]);
+                     }
+              }
+
+              return $dailyMenu;
+       }
+
+       /**
+        * Расчитывает количество дополнительных граммов для рецепта
+        * @param \App\Models\Recipe $recipe Рецепт
+        * @param float $targetCalories Целевая калорийность
+        * @return int Количество дополнительных граммов (не более 300)
+        */
+       private function calculateAdditionalGrams($recipe, float $targetCalories) : int {
+              $grams = ($targetCalories / $recipe->nutrients['calories']) * 100;
+              return min($grams, 300);
        }
 }
