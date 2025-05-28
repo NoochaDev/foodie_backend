@@ -64,9 +64,12 @@ class RecipesSelectionController extends Controller
         $user = User::findOrFail(1);
         $userId = $user->id;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
+        $bannedIngredientsIds = $request->input('banned_ingredients_ids', []);
 
         // Фильтруем рецепты по поступившим из запроса ингредиентам
-        $filteredRecipes = app(RecipeFilterService::class)->getFilteredRecipes($selectedIngredientsIds);
+        $filteredRecipes = app(RecipeFilterService::class)->getFilteredRecipes(
+            $selectedIngredientsIds, $bannedIngredientsIds
+        );
 
         // Инициализация планировщика меню на неделю
         $planner = app(MenuPlanner::class);
@@ -81,8 +84,8 @@ class RecipesSelectionController extends Controller
         );
 
         // Сохраняем в БД
-        // DB::table('meal_plan')->where('user_id', $userId)->delete();
-        // DB::table('meal_plan')->insert($weeklyMenu);
+        DB::table('meal_plan')->where('user_id', $userId)->delete();
+        DB::table('meal_plan')->insert($weeklyMenu);
 
         return new MenuRecipeResource($weeklyMenu);
     }

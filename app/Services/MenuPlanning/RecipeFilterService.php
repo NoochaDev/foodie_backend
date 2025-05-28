@@ -11,14 +11,30 @@ class RecipeFilterService {
        которых отсутствует максимум 2 ингредиента 
        */
 
-       public function getFilteredRecipes(array $selectedIngredientsIds) {
+       public function getFilteredRecipes(array $selectedIngredientIds, array $bannedIngredientIds = []) {
+              $selectedIds = implode(',', $selectedIngredientIds ?: [0]);
+              $bannedIds = implode(',', $bannedIngredientIds ?: [0]);
+
               $filteredRecipes = Recipe::select('recipes.*')
                      ->join('ingredient_recipe', 'recipes.id', '=', 'ingredient_recipe.recipe_id')
                      ->leftJoin('ingredients', 'ingredients.id', '=', 'ingredient_recipe.ingredient_id')
                      ->groupBy('recipes.id')
-                     ->havingRaw('SUM(CASE WHEN ingredients.id NOT IN (' . implode(',', $selectedIngredientsIds ?: [0]) . ') THEN 1 ELSE 0 END) <= 2')
-                     ->with('ingredients')
-                     ->get();
+                     // 1. Разрешаем максимум 2 пропущенных ингредиента
+                     ->havingRaw("
+                            SUM(CASE 
+                                   WHEN ingredients.id NOT IN ($selectedIds) THEN 1 
+                                   ELSE 0 
+                            END) <= 2
+                     ")
+                     // 2. Исключаем рецепты, где есть хоть 1 забаненный ингредиент
+                     ->havingRaw("
+                            SUM(CASE 
+                                   WHEN ingredients.id IN ($bannedIds) THEN 1 
+                                   ELSE 0 
+                            END) = 0
+                     ")
+              ->with('ingredients')
+              ->get();
 
               return $filteredRecipes;
        }
