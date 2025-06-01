@@ -27,20 +27,6 @@ class DayPlan
                      ->pluck('recipe');
        }
 
-       public function getNutrients(): array
-       {
-              return $this->getRecipes()->reduce(function ($carry, $recipe) {
-                     $nutrients = $recipe->nutrients;
-
-                     $carry['protein'] += $nutrients['protein'];
-                     $carry['fat'] += $nutrients['fat'];
-                     $carry['carbs'] += $nutrients['carbs'];
-                     $carry['calories'] += $nutrients['calories'];
-
-                     return $carry;
-              }, ['protein' => 0, 'fat' => 0, 'carbs' => 0, 'calories' => 0]);
-       }
-
        public function getDay(): int
        {
               return $this->day;

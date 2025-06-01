@@ -25,4 +25,9 @@ class MealPlan extends Model
        {
               return $this->belongsTo(Recipe::class);
        }
+
+       public function ingredientReplacements()
+       {
+              return $this->hasMany(MealPlanIngredientReplacement::class);
+       }
 }

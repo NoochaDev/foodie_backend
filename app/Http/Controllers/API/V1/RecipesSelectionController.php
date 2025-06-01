@@ -29,40 +29,12 @@ class RecipesSelectionController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Генерация меню питания на неделю
      */
-    public function store(Request $request)
-    {
-        //
-    }
-
-    /**
-     * Display the specified resource.
-     */
-    public function show(string $id)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
-    {
-        //
-    }
-
     public function selectRecipes(Request $request) {
         $user = User::findOrFail(1);
         $userId = $user->id;
+        $amount_per_day = $user->amount_per_day;
         $selectedIngredientsIds = $request->input('selected_ingredients_ids', []);
         $bannedIngredientsIds = $request->input('banned_ingredients_ids', []);
 
@@ -73,8 +45,6 @@ class RecipesSelectionController extends Controller
 
         // Инициализация планировщика меню на неделю
         $planner = app(MenuPlanner::class);
-
-        $amount_per_day = $user->amount_per_day;
 
         // Генерируем меню на неделю
         $weeklyMenu = $planner->generateWeeklyMenu(

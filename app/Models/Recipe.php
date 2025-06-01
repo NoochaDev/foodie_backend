@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 use App\Enums\MealType as MealTypeEnum;
 
+use App\Models\IngredientReplacement;
 use App\Models\Ingredient;
 use App\Models\MealType;
 
@@ -34,8 +35,12 @@ class Recipe extends Model
 
     public function ingredients() {
         return $this->belongsToMany(Ingredient::class)
-        ->withPivot('amount')
-        ->withTimestamps();
+            ->withPivot('amount')
+            ->withTimestamps();
+    }
+
+    public function ingredientReplacements() {
+        return $this->hasMany(IngredientReplacement::class);
     }
 
     public function getNutrientsAttribute()

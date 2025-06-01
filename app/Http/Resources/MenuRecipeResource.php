@@ -7,6 +7,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 use App\Enums\MealType as MealTypeEnum;
 
+use App\Models\IngredientReplacement;
 use App\Models\Recipe;
 
 
@@ -54,6 +55,11 @@ class MenuRecipeResource extends JsonResource
                     'id' => $recipe->id,
                     'title' => $recipe->title,
                     'meal_type_id' => $recipe->meal_type_id,
+                    'alternative_ingredients_ids' => $recipe->ingredientReplacements->map(function (IngredientReplacement $replacement) {
+                        return [
+                            'id' => $replacement->alternative_ingredient_id,
+                        ];
+                    }),
                     'nutrients' => $nutrients,
                 ];
 
