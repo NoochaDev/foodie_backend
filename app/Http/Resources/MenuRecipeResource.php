@@ -8,6 +8,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 use App\Enums\MealType as MealTypeEnum;
 
 use App\Models\IngredientReplacement;
+use App\Models\Ingredient;
 use App\Models\Recipe;
 
 
@@ -55,9 +56,26 @@ class MenuRecipeResource extends JsonResource
                     'id' => $recipe->id,
                     'title' => $recipe->title,
                     'meal_type_id' => $recipe->meal_type_id,
-                    'alternative_ingredients_ids' => $recipe->ingredientReplacements->map(function (IngredientReplacement $replacement) {
+                    'ingredients' => $recipe->ingredients->map(function (Ingredient $ingredient) use ($recipe) {
+                        $alternatives = $recipe->ingredientReplacements->map(function (IngredientReplacement $replacement) use ($recipe) {
+                            return [
+                                'id' => $replacement->alternativeIngredient->id,
+                                'name' => $replacement->alternativeIngredient->name,
+                                'protein' => $replacement->alternativeIngredient->protein,
+                                'fat' => $replacement->alternativeIngredient->fat,
+                                'carbohydrates' => $replacement->alternativeIngredient->carbohydrates,
+                            ];
+                        });
+
                         return [
-                            'id' => $replacement->alternative_ingredient_id,
+                            'original' => [
+                                'id' => $ingredient->id,
+                                'name' => $ingredient->name,
+                                'protein' => $ingredient->protein,
+                                'fat' => $ingredient->fat,
+                                'carbohydrates' => $ingredient->carbohydrates,
+                            ],
+                            'alternatives' => $alternatives->values(), // может быть пустым, если альтернатив нет
                         ];
                     }),
                     'nutrients' => $nutrients,

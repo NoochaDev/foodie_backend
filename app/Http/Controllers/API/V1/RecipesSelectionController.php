@@ -57,6 +57,7 @@ class RecipesSelectionController extends Controller
         DB::table('meal_plan')->where('user_id', $userId)->delete();
         DB::table('meal_plan')->insert($weeklyMenu);
 
+        // Возвращаем ресурс
         return new MenuRecipeResource($weeklyMenu);
     }
 }
