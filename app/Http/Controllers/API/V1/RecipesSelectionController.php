@@ -57,7 +57,19 @@ class RecipesSelectionController extends Controller
         DB::table('meal_plan')->where('user_id', $userId)->delete();
         DB::table('meal_plan')->insert($weeklyMenu);
 
+        // Подготавливаем данные к передаче в ресурс
+        $usedRecipeIds = collect($weeklyMenu)->pluck('recipe_id')->unique();
+        $recipes = Recipe::with([
+            'ingredients',
+            'ingredientReplacements.alternativeIngredient'
+        ])
+        ->whereIn('id', $usedRecipeIds)
+        ->get()->keyBy('id');
+
         // Возвращаем ресурс
-        return new MenuRecipeResource($weeklyMenu);
+        return new MenuRecipeResource([
+            'weeklyMenu' => $weeklyMenu, 
+            'recipes' => $recipes
+        ]);
     }
 }

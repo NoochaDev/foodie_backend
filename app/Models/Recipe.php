@@ -43,6 +43,10 @@ class Recipe extends Model
         return $this->hasMany(IngredientReplacement::class);
     }
 
+    
+    /**
+     * Возвращает нутриенты исходя из своих ингредиентов (аксессор)
+     */
     public function getNutrientsAttribute()
     {
         $protein = $fat = $carbohydrates = 0;
@@ -58,5 +62,38 @@ class Recipe extends Model
         $calories = 4 * $protein + 9 * $fat + 4 * $carbohydrates;
 
         return compact('protein', 'fat', 'carbohydrates', 'calories');
+    }
+
+    /**
+     * Возвращает ингредиенты с альтернативами (аксессор)
+     */
+    public function getIngredientsWithAlternatives()
+    {
+        return collect($this->ingredients->map(function (Ingredient $ingredient) {
+            // Берем альтернативы из метода ingredientReplacements
+            $alternatives = $this->ingredientReplacements
+            ->where('original_ingredient_id', $ingredient->id)
+            ->map(function (IngredientReplacement $replacement) {
+                return [
+                    'id' => $replacement->alternativeIngredient->id,
+                    'name' => $replacement->alternativeIngredient->name,
+                    'protein' => $replacement->alternativeIngredient->protein,
+                    'fat' => $replacement->alternativeIngredient->fat,
+                    'carbohydrates' => $replacement->alternativeIngredient->carbohydrates,
+                ];
+            });
+
+            // Возвращаем все ингредиенты (парами: оригинальные и альтернативные ингредиенты)
+            return [
+                'original' => [
+                    'id' => $ingredient->id,
+                    'name' => $ingredient->name,
+                    'protein' => $ingredient->protein,
+                    'fat' => $ingredient->fat,
+                    'carbohydrates' => $ingredient->carbohydrates,
+                    'alternatives' => $alternatives->values(),
+                ],
+            ];
+        }));
     }
 }
