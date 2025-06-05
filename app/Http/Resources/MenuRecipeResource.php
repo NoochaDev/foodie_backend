@@ -25,6 +25,7 @@ class MenuRecipeResource extends JsonResource
          */
         return collect($weeklyMenu)->groupBy('day')->map(function ($dayEntries) use ($recipes) {
             $dayResult = [
+                'day' => $dayEntries->first()['day'],
                 'breakfast' => [],
                 'lunch' => [],
                 'dinner' => [],

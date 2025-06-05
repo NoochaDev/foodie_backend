@@ -10,14 +10,15 @@ use Illuminate\Support\Facades\DB;
 use App\Http\Resources\MenuRecipeResource;
 
 use App\Models\User;
+use App\Models\MealPlan;
 use App\Models\Recipe;
 
 use App\Services\MenuPlanning\MenuPlanner;
+use App\Services\MenuPlanning\DayPlan;
 use App\Services\MenuPlanning\RecipeFilterService;
-use App\Services\MenuPlanning\MenuFormatterService;
 
 
-class RecipesSelectionController extends Controller
+class MenuController extends Controller
 {
     /**
      * Display a listing of the resource.
@@ -26,6 +27,38 @@ class RecipesSelectionController extends Controller
     {
         $recipes = Recipe::with('ingredients')->get();
         return response()->json($recipes);
+    }
+
+    /**
+     * Возвращает меню питания на день
+     */
+    public function dailyMenu(Request $request) {
+        $user = User::findOrFail(1);
+        $dailyMenu = new DayPlan($user, $request->integer('day'));
+
+        $mealPlanForDay = MealPlan::with([
+            'recipe.ingredients',
+            'recipe.ingredientReplacements.alternativeIngredient'
+        ])->where('user_id', $user->id)
+        ->where('day', $request->integer('day'))
+        ->get();
+
+        // Загружаем все рецепты, которые участвуют в меню
+        $recipeIds = $mealPlanForDay->pluck('recipe_id')->unique();
+
+        $recipes = Recipe::with([
+            'ingredients',
+            'ingredientReplacements.alternativeIngredient'
+        ])
+        ->whereIn('id', $recipeIds)
+        ->get()
+        ->keyBy('id');
+
+        // Возвращаем через MenuRecipeResource
+        return new MenuRecipeResource([
+            'weeklyMenu' => $mealPlanForDay,
+            'recipes' => $recipes,
+        ]);
     }
 
     /**
@@ -44,14 +77,14 @@ class RecipesSelectionController extends Controller
         );
 
         // Инициализация планировщика меню на неделю
-        $planner = app(MenuPlanner::class);
-
-        // Генерируем меню на неделю
-        $weeklyMenu = $planner->generateWeeklyMenu(
+        $planner = new MenuPlanner(
             $amount_per_day,
             $userId,
             $filteredRecipes,
         );
+
+        // Генерируем меню на неделю
+        $weeklyMenu = $planner->generateWeeklyMenu();
 
         // Сохраняем в БД
         DB::table('meal_plan')->where('user_id', $userId)->delete();

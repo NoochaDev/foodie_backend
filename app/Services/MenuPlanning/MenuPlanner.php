@@ -5,7 +5,6 @@ namespace App\Services\MenuPlanning;
 use Illuminate\Support\Collection;
 
 use App\Enums\MealType as MealTypeEnum;
-use App\Models\Recipe;
 
 
 class MenuPlanner {
@@ -20,6 +19,16 @@ class MenuPlanner {
               MealTypeEnum::LUNCH->value => 0.4,
               MealTypeEnum::DINNER->value => 0.3,
        ];
+
+       protected float $targetCalories;
+       protected int $userId;
+       protected $recipes;
+
+       public function __construct(float $targetCalories, int $userId, $recipes)  {
+              $this->targetCalories = $targetCalories;
+              $this->userId = $userId;
+              $this->recipes = collect($recipes);
+       }
        
        /** 
         * Генерирует меню на неделю с учетом целевой калорийности и рецептов которые подходят пользователю
@@ -28,11 +37,11 @@ class MenuPlanner {
         * @param \Illuminate\Support\Collection|array $recipes Коллекция или массив рецептов
         * @return array Сформированное меню на неделю
        */
-       public function generateWeeklyMenu(float $targetCalories, int $userId, $recipes) : array {
+       public function generateWeeklyMenu() : array {
               $weeklyMenu = [];
 
               for ($day = 1; $day < 8; $day++) {
-                     $dailyMenu = $this->generateDailyMenu($day, $targetCalories, $userId, $recipes);
+                     $dailyMenu = $this->generateDailyMenu($day, $this->targetCalories, $this->userId, $this->recipes);
                      $weeklyMenu = array_merge($weeklyMenu, $dailyMenu->toArray());
               }
 
